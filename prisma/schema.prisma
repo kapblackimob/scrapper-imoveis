@@ -6,7 +6,7 @@ datasource db {
   // Usado para desenvolvimento local
   // provider = "sqlite"
   // Usado para desenvolvimento em produção
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
