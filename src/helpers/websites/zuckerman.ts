@@ -1,84 +1,108 @@
 import { InternalServerErrorException } from "@nestjs/common";
 import axios from "axios";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";
+import * as qs from "querystring";
 import { ImovelDataDto } from "../../endpoints/imoveis/ImovelDataDto";
 import { Website } from "../../graphql.schema";
-import { convertImovelType, convertToNumber } from "../convertionsToTypes";
+import { convertImovelType } from "../convertionsToTypes";
 import { encrypt } from "../crypt";
 
 export const zuckerman = async (websiteData: Website, pagina: string) => {
-	const imoveisData: ImovelDataDto[] = [];
+        const imoveisData: ImovelDataDto[] = [];
+        const baseUrl = "https://www.portalzuk.com.br";
+        const pageUrl = `${baseUrl}${pagina}`;
 
-	const url = `${websiteData.baseUrl}${pagina}`;
+        try {
+                // Passo 1: GET para obter token CSRF e cookies da sessão
+                const getResponse = await axios.get(pageUrl, {
+                        headers: {
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        },
+                });
 
-	return await axios
-		.get(url)
-		.then((response) => {
-			const $ = cheerio.load(response.data);
+                const token = getResponse.data.match(/name="_token"\s+value="([^"]+)"/)?.[1];
+                const cookies = getResponse.headers["set-cookie"]
+                        ?.map((c: string) => c.split(";")[0])
+                        .join("; ");
 
-			const imoveis = $(".card-property.card_lotes_div");
+                if (!token) throw new Error("Token CSRF não encontrado");
 
-			imoveis.each(function () {
-				const title = $(this)
-					.find(".card-property-address > span:last-of-type")
-					.text();
+                // Passo 2: POST para carregar os cards de imóveis
+                const postResponse = await axios.post(
+                        `${baseUrl}/leilao-de-imoveis/mais`,
+                        qs.stringify({
+                                limit: 12,
+                                count_imovel_zuk: 0,
+                                path: pagina,
+                                bounds: "",
+                                order: "menor-preco",
+                                div_parceiro_count: 0,
+                                _token: token,
+                        }),
+                        {
+                                headers: {
+                                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                                        "Content-Type": "application/x-www-form-urlencoded",
+                                        "Referer": pageUrl,
+                                        "X-Requested-With": "XMLHttpRequest",
+                                        "Cookie": cookies,
+                                },
+                        }
+                );
 
-				const amountText = $(this)
-					.find(
-						".card-property-prices > li:last-of-type .card-property-price-value"
-					)
-					.text()
-					.replace(/[^0-9]/g, "");
-				const status = $(this)
-					.find(".cd-it-r2-1")
-					.text()
-					.toLowerCase()
-					.replace("Leilão ", "");
-				const url = `${$(this)
-					.find(".card-property-image-wrapper > a")
-					.attr("href")}`;
-				const image = `${$(this)
-					.find(".card-property-image-wrapper > a > img")
-					.attr("src")}`;
-				const description = `${$(this)
-					.find(".card-property-image-wrapper > a > img")
-					.attr("alt")}`;
-				const size = `${$(this).find(".card-property-info-label").text()}`;
-				const type = `${$(this)
-					.find(".card-property-prices > li:first-of-type > span")
-					.text()}`;
+                const $ = cheerio.load(postResponse.data);
 
-				const amount = convertToNumber(amountText);
-				const slug = encrypt(`${title}${description}${amount}`);
+                $(".card-property").each(function () {
+                        const title = $(this)
+                                .find(".card-property-address > span:last-of-type")
+                                .text()
+                                .trim();
 
-				const imovelData: ImovelDataDto = {
-					slug,
-					title,
-					amount,
-					status,
-					description,
-					image,
-					size,
-					type: convertImovelType(type),
-					url,
-				};
+                        const amountText = $(this)
+                                .find(".card-property-prices:last-of-type li:last-child .card-property-price-value")
+                                .clone()
+                                .children()
+                                .remove()
+                                .end()
+                                .text()
+                                .replace(/R\$/g, "")
+                                .replace(/\./g, "")
+                                .replace(",", ".")
+                                .trim();
 
-				imoveisData.push(imovelData);
-			});
+                        const amount = parseFloat(amountText);
+                        if (isNaN(amount) || !title) return;
 
-			return imoveisData.length > 0 ? imoveisData : [null];
-		})
-		.catch((err) => {
-			throw new InternalServerErrorException(
-				{
-					websiteData,
-					pagina,
-					url,
-				},
-				{
-					description: "Erro ao pegar as informações do imovel",
-					cause: err,
-				}
-			);
-		});
+                        const url = `${$(this).find(".card-property-image-wrapper > a").attr("href")}`;
+                        const image = `${$(this).find(".card-property-image-wrapper > a > img").attr("src")}`;
+                        const description = `${$(this).find(".card-property-image-wrapper > a > img").attr("alt")}`;
+                        const size = `${$(this).find(".card-property-info-label").text()}`;
+                        const type = `${$(this).find(".card-property-prices > li:first-of-type > span").text()}`;
+                        const status = `${$(this).find(".cd-it-r2-1").text().toLowerCase().replace("Leilão ", "")}`;
+
+                        const slug = encrypt(`${title}${description}${amount}`);
+
+                        const imovelData: ImovelDataDto = {
+                                slug,
+                                title,
+                                amount,
+                                status,
+                                description,
+                                image,
+                                size,
+                                type: convertImovelType(type),
+                                url,
+                        };
+
+                        imoveisData.push(imovelData);
+                });
+
+                return imoveisData;
+
+        } catch (err) {
+                throw new InternalServerErrorException(
+                        { websiteData, pagina, pageUrl },
+                        { description: "Erro ao pegar as informações do imovel", cause: err }
+                );
+        }
 };
