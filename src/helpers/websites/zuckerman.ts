@@ -73,7 +73,11 @@ export const zuckerman = async (websiteData: Website, pagina: string) => {
                         const amount = parseFloat(amountText);
                         if (isNaN(amount) || !title) return;
 
-                        const url = `${$(this).find(".card-property-image-wrapper > a").attr("href")}`;
+                        // Cards sem link (banners/parceiros) não viram imóvel
+                        const href = $(this).find(".card-property-image-wrapper > a").attr("href");
+                        if (!href) return;
+
+                        const url = `${href}`;
                         const image = `${$(this).find(".card-property-image-wrapper > a > img").attr("src")}`;
                         const description = `${$(this).find(".card-property-image-wrapper > a > img").attr("alt")}`;
                         const size = `${$(this).find(".card-property-info-label").text()}`;
