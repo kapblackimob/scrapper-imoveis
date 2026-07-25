@@ -1,7 +1,13 @@
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import TelegramMessager from "src/helpers/TelegramMessager";
+import WhatsAppMessager from "src/helpers/WhatsAppMessager";
 import { extractLocation } from "src/helpers/location";
-import { imoveisDigestText, imovelText } from "src/helpers/text";
+import {
+	imoveisDigestText,
+	imoveisDigestTextWhats,
+	imovelText,
+	imovelTextWhats,
+} from "src/helpers/text";
 import {
 	DIGEST_THRESHOLD,
 	MAX_PENDING_NOTIFICATIONS,
@@ -144,6 +150,8 @@ export class ImoveisService {
 		if (!pending.length) return;
 
 		const telegram = new TelegramMessager();
+		// WhatsApp é best-effort: falha não impede a marcação de notifiedAt (o Telegram é o canal primário)
+		const whatsapp = new WhatsAppMessager();
 
 		// Muitos imoveis: resumo agrupado por site para não estourar o rate limit
 		if (pending.length > DIGEST_THRESHOLD) {
@@ -162,6 +170,17 @@ export class ImoveisService {
 					const sent = await telegram.sendMessageWithRetry(message);
 					if (!sent) allSent = false;
 					await sleep(MESSAGE_DELAY_MS);
+				}
+
+				if (whatsapp.isEnabled()) {
+					const messagesWhats = imoveisDigestTextWhats(
+						group,
+						group[0].website.name
+					);
+					for (const message of messagesWhats) {
+						await whatsapp.sendMessageWithRetry(message);
+						await sleep(MESSAGE_DELAY_MS);
+					}
 				}
 
 				if (allSent) {
@@ -189,6 +208,13 @@ export class ImoveisService {
 			}
 
 			await sleep(MESSAGE_DELAY_MS);
+
+			if (whatsapp.isEnabled()) {
+				await whatsapp.sendMessageWithRetry(
+					imovelTextWhats(imovel, imovel.website.name)
+				);
+				await sleep(MESSAGE_DELAY_MS);
+			}
 		}
 	}
 }

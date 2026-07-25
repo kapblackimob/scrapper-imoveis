@@ -99,6 +99,55 @@ export const imoveisDigestText = (
 	return messages;
 };
 
+// Versões em texto puro (formatação do WhatsApp: *negrito*), sem HTML
+export const imovelTextWhats = (
+	imovelData: Imovel,
+	websiteName: string
+): string => {
+	const clean = (input?: string | null) => stripHtmlTags(input || "");
+
+	let str = `🏠 *${clean(websiteName)}*\n\n`;
+	str += `*Nome:* ${clean(imovelData.title)}\n`;
+	str += `*Valor:* ${formataDinheiro(imovelData.amount)}\n`;
+	imovelData.size && (str += `*Metragem:* ${clean(imovelData.size)}\n`);
+	imovelData.type && (str += `*Tipo:* ${clean(imovelData.type)}\n`);
+	imovelData.status && (str += `*Status:* ${clean(imovelData.status)}\n`);
+	str += `\n${imovelData.url}`;
+
+	return str;
+};
+
+export const imoveisDigestTextWhats = (
+	imoveis: Imovel[],
+	websiteName: string
+): string[] => {
+	const header = `🏠 *${stripHtmlTags(websiteName)}*: ${
+		imoveis.length
+	} imóveis novos ou com preço alterado\n\n`;
+
+	const lines = imoveis.map((imovel) => {
+		const local = stripHtmlTags(imovel.city || imovel.title);
+		const tipo = imovel.type ? ` — ${stripHtmlTags(imovel.type)}` : "";
+		return `• ${local}${tipo} — ${formataDinheiro(imovel.amount)}\n${
+			imovel.url
+		}`;
+	});
+
+	const messages: string[] = [];
+	let current = header;
+
+	for (const line of lines) {
+		if (current.length + line.length > TELEGRAM_MESSAGE_LIMIT) {
+			messages.push(current);
+			current = "";
+		}
+		current += `${line}\n`;
+	}
+	if (current.trim().length) messages.push(current);
+
+	return messages;
+};
+
 export const imovelNotFoundText = (siteName: string) => {
 	return `
 <b>${siteName}</b>
