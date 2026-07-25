@@ -2,6 +2,7 @@ import { InternalServerErrorException } from "@nestjs/common";
 import { caixa } from "src/helpers/websites/caixa";
 import { lancejudicial } from "src/helpers/websites/lancejudicial";
 import { leilaoimovel } from "src/helpers/websites/leilaoimovel";
+import { santander } from "src/helpers/websites/santander";
 import { Website } from "./../../graphql.schema";
 import { zuckerman } from "./../../helpers/websites/zuckerman";
 import { ImovelDataDto } from "./ImovelDataDto";
@@ -39,6 +40,8 @@ const fetchFromSlug = async (
 			return (await zuckerman(data, url)) as ImovelDataDto[];
 		case "caixa":
 			return (await caixa(data, url)) as ImovelDataDto[];
+		case "santander":
+			return await santander(data, url);
 		default:
 			throw new InternalServerErrorException(slug, {
 				description: "A página buscada não existe",
