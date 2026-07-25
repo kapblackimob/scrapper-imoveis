@@ -1,5 +1,7 @@
+import { UseGuards } from "@nestjs/common";
 import { Args, Mutation, Query, Resolver } from "@nestjs/graphql";
 import { PubSub } from "graphql-subscriptions";
+import { ApiKeyGuard } from "src/helpers/ApiKeyGuard";
 import { NewPage, Page } from '../../graphql.schema';
 import { PagesService } from "./pages.service";
 
@@ -16,6 +18,7 @@ export class PagesResolvers {
   }
 
   @Mutation('createPage')
+  @UseGuards(ApiKeyGuard)
   async createPage(@Args('page') page: NewPage): Promise<Page>{
 
     

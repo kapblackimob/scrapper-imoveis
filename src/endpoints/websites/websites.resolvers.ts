@@ -1,5 +1,7 @@
+import { UseGuards } from "@nestjs/common";
 import { Args, Mutation, Query, Resolver } from "@nestjs/graphql";
 import { PubSub } from "graphql-subscriptions";
+import { ApiKeyGuard } from "src/helpers/ApiKeyGuard";
 import { Imovel, Page, Website } from "../../graphql.schema";
 import { WebsitesService } from "./websites.service";
 
@@ -16,6 +18,7 @@ export class WebsitesResolvers {
   }
 
   @Mutation('createWebsite')
+  @UseGuards(ApiKeyGuard)
   async create(@Args('website') website: Website): Promise<Website>{
     const createdWebsite = await this.websitesService.create(website);
     pubSub.publish('websiteCreated', { websiteCreated: createdWebsite });

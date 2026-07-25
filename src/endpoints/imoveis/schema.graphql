@@ -12,6 +12,8 @@ type Imovel {
 	image: String
 	size: String
 	status: String
+	city: String
+	state: String
 }
 
 type ImovelResponse {
@@ -24,6 +26,8 @@ type ImovelResponse {
 	image: String
 	size: String
 	status: String
+	city: String
+	state: String
 }
 
 input NewImovel {
@@ -38,6 +42,8 @@ input NewImovel {
 	image: String
 	size: String
 	status: String
+	city: String
+	state: String
 }
 
 

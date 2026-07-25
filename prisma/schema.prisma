@@ -36,6 +36,21 @@ model Imovel {
   image       String? // Imagem do imovel
   size        String? // Tamanho em metros quadrados
   status      String? // Status atual do imovel (extrajudicial, etc)
+
+  city        String? // Cidade extraida do titulo (quando disponivel)
+  state       String? // UF
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime? @updatedAt // Nulo em registros anteriores a esta coluna (sentinela de legado)
+  notifiedAt  DateTime? // Nulo = aviso no Telegram ainda pendente
+  priceHistory PriceHistory[]
+}
+
+model PriceHistory {
+  id         String   @id @default(uuid())
+  imovelId   String
+  imovel     Imovel   @relation(fields: [imovelId], references: [id])
+  amount     Float
+  capturedAt DateTime @default(now())
 }
 
 model Website {

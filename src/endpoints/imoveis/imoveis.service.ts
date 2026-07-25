@@ -1,12 +1,19 @@
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import TelegramMessager from "src/helpers/TelegramMessager";
-import { imovelText } from "src/helpers/text";
-import { MAX_RETRIES } from "../../constants/configs";
+import { extractLocation } from "src/helpers/location";
+import { imoveisDigestText, imovelText } from "src/helpers/text";
+import {
+	DIGEST_THRESHOLD,
+	MAX_PENDING_NOTIFICATIONS,
+	MESSAGE_DELAY_MS,
+} from "../../constants/configs";
 import { PrismaService } from "../../prisma/prisma.service";
 import { Imovel, ImovelResponse, NewImovel } from "./../../graphql.schema";
 import { ImovelDataDto } from "./ImovelDataDto";
 import { ImovelWithWebsite } from "./imoveis.resolvers";
 import { scrappImoveis } from "./scrappImoveis";
+
+const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 @Injectable()
 export class ImoveisService {
@@ -21,7 +28,8 @@ export class ImoveisService {
 	}
 
 	async removeAll(): Promise<void> {
-		const res = await this.prisma.imovel.deleteMany({});
+		await this.prisma.priceHistory.deleteMany({});
+		await this.prisma.imovel.deleteMany({});
 	}
 
 	async create(imovel: NewImovel): Promise<Imovel> {
@@ -48,12 +56,8 @@ export class ImoveisService {
 
 		const imoveisFinded: ImovelDataDto[] = [];
 
-		const TelegramObject = new TelegramMessager();
-
 		await Promise.all(
 			websites.map(async (website) => {
-				let delay = 1000; // Começando com 1 segundo
-
 				const imoveisScrapped = await scrappImoveis({
 					...website,
 					imoveis: [],
@@ -64,70 +68,127 @@ export class ImoveisService {
 					(imovel) => !imovel.type || imovel.type !== "Desconhecido"
 				);
 
-				await Promise.all(
-					imoveisSelecteds.map(async (imovelScrapped) => {
-						let imovelExists = website.imoveis.find(
-							(imovel) => imovel.slug === imovelScrapped.slug
-						);
-						let imovelSynced: Imovel;
+				for (const imovelScrapped of imoveisSelecteds) {
+					const imovelExists = website.imoveis.find(
+						(imovel) => imovel.slug === imovelScrapped.slug
+					);
+					const location = extractLocation(website.slug, imovelScrapped.title);
 
-						try {
-							// é update
-							if (imovelExists) {
-								// Se teve alteração de valor ele é atualizado. Senão ele é ignorado
-								if (imovelExists.amount !== imovelScrapped.amount) {
-									imoveisFinded.push(imovelScrapped);
-
-									imovelSynced = await this.prisma.imovel.update({
-										data: {
-											...imovelScrapped,
-										},
-										where: {
-											id: imovelExists.id,
-										},
-									});
-								}
-
-								// é criação
-							} else {
+					try {
+						// é update: só quando houve alteração de valor. Senão é ignorado
+						if (imovelExists) {
+							if (imovelExists.amount !== imovelScrapped.amount) {
 								imoveisFinded.push(imovelScrapped);
-								imovelSynced = await this.create({
-									...imovelScrapped,
-									websiteId: website.id,
+
+								await this.prisma.imovel.update({
+									data: {
+										...imovelScrapped,
+										...location,
+										// notifiedAt nulo = entra na fila de avisos pendentes
+										notifiedAt: null,
+										priceHistory: {
+											create: { amount: imovelScrapped.amount },
+										},
+									},
+									where: {
+										id: imovelExists.id,
+									},
 								});
 							}
-						} catch (error) {
-							throw new InternalServerErrorException(
-								imovelExists || imovelScrapped,
-								{
-									description: "Erro ao criar/atualizar o seguinte imovel",
-								}
-							);
+
+							// é criação
+						} else {
+							imoveisFinded.push(imovelScrapped);
+							await this.prisma.imovel.create({
+								data: {
+									...imovelScrapped,
+									...location,
+									websiteId: website.id,
+									priceHistory: {
+										create: { amount: imovelScrapped.amount },
+									},
+								},
+							});
 						}
-
-						// Se houve alguma alteração ou criação é enviado um aviso ao bot
-						if (imovelSynced) {
-							let retryCount = 0;
-							while (retryCount < MAX_RETRIES) {
-								try {
-									await TelegramObject.sendMessage(
-										imovelText(imovelSynced, website.name)
-									);
-
-									break;
-								} catch (error) {
-									// if (error.message.contains('Too Many Requests') || error.response.statusMessage.contains('Too Many Requests')) {
-									// console.log("MENSAGEM: ", error.response.body.description);
-									await new Promise((res) => setTimeout(res, delay));
-									delay += 10000; // Aumenta em 10 segundos a espera retentativa
-									retryCount++;
-								}
+					} catch (error) {
+						throw new InternalServerErrorException(
+							imovelExists || imovelScrapped,
+							{
+								description: "Erro ao criar/atualizar o seguinte imovel",
 							}
-						}
-					})
-				);
+						);
+					}
+				}
 			})
 		);
+
+		await this.notifyPending();
+
 		return imoveisFinded;
+	}
+
+	// Envia os avisos pendentes (notifiedAt nulo) de forma sequencial, marcando
+	// notifiedAt apenas após envio com sucesso — falha fica pendente para a próxima rodada.
+	// O filtro updatedAt != null exclui registros anteriores à coluna (legado já avisado).
+	private async notifyPending(): Promise<void> {
+		const pending = await this.prisma.imovel.findMany({
+			where: {
+				notifiedAt: null,
+				updatedAt: { not: null },
+			},
+			orderBy: { updatedAt: "desc" },
+			take: MAX_PENDING_NOTIFICATIONS,
+			include: { website: true },
+		});
+
+		if (!pending.length) return;
+
+		const telegram = new TelegramMessager();
+
+		// Muitos imoveis: resumo agrupado por site para não estourar o rate limit
+		if (pending.length > DIGEST_THRESHOLD) {
+			const byWebsite = new Map<string, typeof pending>();
+			for (const imovel of pending) {
+				const group = byWebsite.get(imovel.websiteId) || [];
+				group.push(imovel);
+				byWebsite.set(imovel.websiteId, group);
+			}
+
+			for (const group of byWebsite.values()) {
+				const messages = imoveisDigestText(group, group[0].website.name);
+
+				let allSent = true;
+				for (const message of messages) {
+					const sent = await telegram.sendMessageWithRetry(message);
+					if (!sent) allSent = false;
+					await sleep(MESSAGE_DELAY_MS);
+				}
+
+				if (allSent) {
+					await this.prisma.imovel.updateMany({
+						where: { id: { in: group.map((imovel) => imovel.id) } },
+						data: { notifiedAt: new Date() },
+					});
+				}
+			}
+
+			return;
+		}
+
+		// Poucos imoveis: mensagens individuais com intervalo entre envios
+		for (const imovel of pending) {
+			const sent = await telegram.sendMessageWithRetry(
+				imovelText(imovel, imovel.website.name)
+			);
+
+			if (sent) {
+				await this.prisma.imovel.update({
+					where: { id: imovel.id },
+					data: { notifiedAt: new Date() },
+				});
+			}
+
+			await sleep(MESSAGE_DELAY_MS);
+		}
 	}
 }

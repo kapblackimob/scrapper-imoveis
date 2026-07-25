@@ -9,6 +9,7 @@ export class AdminService{
 
   async removeAll(): Promise<void> {
 
+    await this.prisma.priceHistory.deleteMany({ });
     const res = await this.prisma.imovel.deleteMany({ });
     const res3 = await this.prisma.page.deleteMany({ });
     const res2 = await this.prisma.website.deleteMany({ });

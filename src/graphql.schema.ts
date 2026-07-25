@@ -19,6 +19,8 @@ export class NewImovel {
     image?: Nullable<string>;
     size?: Nullable<string>;
     status?: Nullable<string>;
+    city?: Nullable<string>;
+    state?: Nullable<string>;
 }
 
 export class NewPage {
@@ -62,6 +64,8 @@ export class Imovel {
     image?: Nullable<string>;
     size?: Nullable<string>;
     status?: Nullable<string>;
+    city?: Nullable<string>;
+    state?: Nullable<string>;
 }
 
 export class ImovelResponse {
@@ -74,6 +78,8 @@ export class ImovelResponse {
     image?: Nullable<string>;
     size?: Nullable<string>;
     status?: Nullable<string>;
+    city?: Nullable<string>;
+    state?: Nullable<string>;
 }
 
 export class Page {

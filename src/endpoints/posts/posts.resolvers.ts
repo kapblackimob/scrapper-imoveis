@@ -1,5 +1,7 @@
+import { UseGuards } from '@nestjs/common';
 import { Resolver, Query, Mutation, Args, Subscription } from '@nestjs/graphql';
 import { PostsService } from './posts.service';
+import { ApiKeyGuard } from 'src/helpers/ApiKeyGuard';
 import { Post, NewPost, UpdatePost } from 'src/graphql.schema';
 import { PubSub } from 'graphql-subscriptions';
 
@@ -20,6 +22,7 @@ export class PostsResolvers {
   }
 
   @Mutation('createPost')
+  @UseGuards(ApiKeyGuard)
   async create(@Args('input') args: NewPost): Promise<Post> {
     const createdPost = await this.postService.create(args);
     pubSub.publish('postCreated', { postCreated: createdPost });
@@ -27,11 +30,13 @@ export class PostsResolvers {
   }
 
   @Mutation('updatePost')
+  @UseGuards(ApiKeyGuard)
   async update(@Args('input') args: UpdatePost): Promise<Post> {
     return this.postService.update(args);
   }
 
   @Mutation('deletePost')
+  @UseGuards(ApiKeyGuard)
   async delete(@Args('id') args: string): Promise<Post> {
     return this.postService.delete(args);
   }
