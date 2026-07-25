@@ -9,6 +9,11 @@ import { Request, Response } from "express";
 @Catch(HttpException)
 export class ErrorHandler implements ExceptionFilter {
 	catch(exception: HttpException, host: ArgumentsHost) {
+		// Em contexto GraphQL não existe response HTTP: repassa para o Apollo formatar
+		if (host.getType<string>() === "graphql") {
+			return exception;
+		}
+
 		const ctx = host.switchToHttp();
 		const response = ctx.getResponse<Response>();
 		const request = ctx.getRequest<Request>();
@@ -19,7 +24,6 @@ export class ErrorHandler implements ExceptionFilter {
 			statusCode: status,
 			timestamp: new Date().toISOString(),
 			path: request.url,
-			stack: exception.stack,
 		});
 	}
 }
